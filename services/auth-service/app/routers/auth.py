@@ -1,7 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends, status  # type: ignore[reportMissingImports]
+from sqlalchemy.ext.asyncio import AsyncSession  # type: ignore[reportMissingImports]
 
 from app.core.database import get_db_session
 from app.dependencies import AuthContext, get_current_user
