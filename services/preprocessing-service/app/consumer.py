@@ -103,9 +103,8 @@ class PreprocessingConsumer:
         s3_key_processed = build_processed_s3_key(s3_key_original)
         upload_to_s3(processed_image, s3_key_processed)
 
-        publish_event(
+        publish_image_preprocessed(
             producer,
-            settings.kafka_topic_image_preprocessed,
             {
                 "image_id": image_id,
                 "tenant_id": tenant_id,
@@ -143,3 +142,7 @@ def build_processed_s3_key(original_key: str) -> str:
     if original_key.lower().endswith(".png"):
         return f"{original_key[:-4]}_processed.png"
     return f"{original_key}_processed.png"
+
+
+def publish_image_preprocessed(producer: Any, payload: dict[str, Any]) -> None:
+    publish_event(producer, settings.kafka_topic_image_preprocessed, payload)
