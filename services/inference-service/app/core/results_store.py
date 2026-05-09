@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from decimal import Decimal
 from functools import lru_cache
@@ -44,6 +46,12 @@ def save_result(
 
     table = get_dynamodb_resource().Table(settings.dynamodb_table_name)
     table.put_item(Item=_to_dynamodb_item(item))
+
+
+def get_result(image_id: str, tenant_id: str) -> dict[str, Any] | None:
+    table = get_dynamodb_resource().Table(settings.dynamodb_table_name)
+    response = table.get_item(Key={"tenant_id": tenant_id, "image_id": image_id})
+    return response.get("Item")
 
 
 def _to_dynamodb_item(value: Any) -> Any:

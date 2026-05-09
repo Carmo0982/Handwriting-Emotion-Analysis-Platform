@@ -92,7 +92,7 @@ class InferenceConsumer:
         image_id = str(payload["image_id"])
         tenant_id = str(payload["tenant_id"])
         user_id = str(payload["user_id"])
-        s3_key_processed = str(payload["s3_key_processed"])
+        s3_key_processed = str(payload.get("s3_key_processed") or payload["s3_key"])
 
         try:
             image_bytes = download_from_s3(s3_key_processed)
