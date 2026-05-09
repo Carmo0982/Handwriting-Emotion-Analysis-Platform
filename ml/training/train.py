@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, Optional
 
 import numpy as np
@@ -30,6 +31,7 @@ def run_kfold_training(
     device: Optional[str | torch.device] = None,
     num_workers: int = 2,
     seed: int = 42,
+    model_factory: Optional[Callable[[], nn.Module]] = None,
 ) -> dict[str, Any]:
     resolved_device = _resolve_device(device)
     output_dir = Path(checkpoint_dir)
@@ -43,88 +45,23 @@ def run_kfold_training(
         splitter.split(np.zeros(len(labels)), labels),
         start=1,
     ):
-        train_subset, val_subset = _build_fold_subsets(
+        fold_result = train_fold(
             dataset=dataset,
             train_indices=train_indices,
             val_indices=val_indices,
-        )
-        train_loader = DataLoader(
-            train_subset,
+            fold_index=fold_index,
+            epochs=epochs,
             batch_size=batch_size,
-            shuffle=True,
+            checkpoint_dir=output_dir,
+            device=resolved_device,
             num_workers=num_workers,
-            pin_memory=resolved_device.type == "cuda",
+            model_factory=model_factory,
         )
-        val_loader = DataLoader(
-            val_subset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers,
-            pin_memory=resolved_device.type == "cuda",
-        )
-
-        model = EmotionClassifier(num_classes=len(CLASS_NAMES), pretrained=True)
-        model.to(resolved_device)
-
-        criterion = nn.CrossEntropyLoss()
-        optimizer = AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
-        scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
-
-        best_f1 = -1.0
-        best_checkpoint_path = output_dir / f"fold_{fold_index}_best.pt"
-
-        for epoch in range(1, epochs + 1):
-            train_loss = _train_one_epoch(
-                model=model,
-                dataloader=train_loader,
-                criterion=criterion,
-                optimizer=optimizer,
-                device=resolved_device,
-            )
-            scheduler.step()
-
-            metrics = evaluate_model(
-                model=model,
-                dataloader=val_loader,
-                device=resolved_device,
-                class_names=CLASS_NAMES,
-            )
-            f1_macro = float(metrics["f1_macro"])
-
-            logger.info(
-                "Fold %s/%s epoch %s/%s - loss %.4f - macro F1 %.4f",
-                fold_index,
-                k,
-                epoch,
-                epochs,
-                train_loss,
-                f1_macro,
-            )
-
-            if f1_macro > best_f1:
-                best_f1 = f1_macro
-                torch.save(
-                    {
-                        "fold": fold_index,
-                        "epoch": epoch,
-                        "f1_macro": best_f1,
-                        "class_names": CLASS_NAMES,
-                        "model_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                    },
-                    best_checkpoint_path,
-                )
-
-        fold_result = {
-            "fold": fold_index,
-            "best_f1_macro": best_f1,
-            "checkpoint_path": str(best_checkpoint_path),
-        }
         fold_results.append(fold_result)
         logger.info(
             "Fold %s completed - best macro F1 %.4f",
             fold_index,
-            best_f1,
+            fold_result["best_f1_macro"],
         )
 
     mean_f1 = float(np.mean([fold["best_f1_macro"] for fold in fold_results]))
@@ -133,6 +70,108 @@ def run_kfold_training(
     return {
         "folds": fold_results,
         "mean_f1_macro": mean_f1,
+    }
+
+
+def train_fold(
+    dataset: Dataset,
+    train_indices: np.ndarray,
+    val_indices: np.ndarray,
+    fold_index: int = 1,
+    epochs: int = 1,
+    batch_size: int = 16,
+    checkpoint_dir: str | Path = "checkpoints",
+    device: Optional[str | torch.device] = None,
+    num_workers: int = 0,
+    model_factory: Optional[Callable[[], nn.Module]] = None,
+) -> dict[str, Any]:
+    resolved_device = _resolve_device(device)
+    output_dir = Path(checkpoint_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    train_subset, val_subset = _build_fold_subsets(
+        dataset=dataset,
+        train_indices=np.asarray(train_indices),
+        val_indices=np.asarray(val_indices),
+    )
+    train_loader = DataLoader(
+        train_subset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=resolved_device.type == "cuda",
+    )
+    val_loader = DataLoader(
+        val_subset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=resolved_device.type == "cuda",
+    )
+
+    model = model_factory() if model_factory is not None else EmotionClassifier(
+        num_classes=len(CLASS_NAMES),
+        pretrained=True,
+    )
+    model.to(resolved_device)
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2)
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+
+    best_f1 = -1.0
+    best_metrics: dict[str, Any] = {}
+    best_checkpoint_path = output_dir / f"fold_{fold_index}_best.pt"
+
+    for epoch in range(1, epochs + 1):
+        train_loss = _train_one_epoch(
+            model=model,
+            dataloader=train_loader,
+            criterion=criterion,
+            optimizer=optimizer,
+            device=resolved_device,
+        )
+        scheduler.step()
+
+        metrics = evaluate_model(
+            model=model,
+            dataloader=val_loader,
+            device=resolved_device,
+            class_names=CLASS_NAMES,
+        )
+        f1_macro = float(metrics["f1_macro"])
+
+        logger.info(
+            "Fold %s epoch %s/%s - loss %.4f - macro F1 %.4f",
+            fold_index,
+            epoch,
+            epochs,
+            train_loss,
+            f1_macro,
+        )
+
+        if f1_macro > best_f1:
+            best_f1 = f1_macro
+            best_metrics = metrics
+            torch.save(
+                {
+                    "fold": fold_index,
+                    "epoch": epoch,
+                    "f1_macro": best_f1,
+                    "class_names": CLASS_NAMES,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                },
+                best_checkpoint_path,
+            )
+
+    return {
+        "fold": fold_index,
+        "best_f1_macro": best_f1,
+        "f1_score": best_f1,
+        "metrics": best_metrics,
+        "model_state_dict": model.state_dict(),
+        "checkpoint_path": str(best_checkpoint_path),
     }
 
 

@@ -42,9 +42,6 @@ class HandwritingDataset(Dataset):
         self.samples = samples if samples is not None else self._discover_samples()
         self.targets = [label for _, label in self.samples]
 
-        if not self.samples:
-            raise ValueError(f"No supported images found under {self.root_dir}")
-
     def __len__(self) -> int:
         return len(self.samples)
 
