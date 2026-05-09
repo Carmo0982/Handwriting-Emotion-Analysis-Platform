@@ -1,0 +1,233 @@
+name: tdse-local
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: tdse-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_DB: ${POSTGRES_DB:-tdse}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: tdse-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: tdse-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-tdse-images}
+    volumes:
+      - ./infra/minio/init_minio.sh:/init_minio.sh:ro
+    entrypoint: ["/bin/sh", "/init_minio.sh"]
+
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    container_name: tdse-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: tdse-kafka
+    depends_on:
+      zookeeper:
+        condition: service_started
+    ports:
+      - "9092:29092"
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_LISTENERS: INTERNAL://:9092,EXTERNAL://:29092
+      KAFKA_CFG_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9092
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    container_name: tdse-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka/init_topics.sh:/init_topics.sh:ro
+    entrypoint: ["/bin/bash", "/init_topics.sh"]
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: tdse-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: tdse-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: tdse-dynamodb-local
+    command: "-jar DynamoDBLocal.jar -inMemory -sharedDb"
+    ports:
+      - "8000:8000"
+
+  dynamodb-init:
+    image: amazon/aws-cli:2.15.57
+    container_name: tdse-dynamodb-init
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_KEY:-minioadmin}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      DYNAMODB_ENDPOINT: ${DYNAMODB_ENDPOINT:-http://dynamodb-local:8000}
+      DYNAMODB_TABLE: ${DYNAMODB_TABLE:-inference-results}
+    volumes:
+      - ./infra/dynamodb/init_dynamodb.sh:/init_dynamodb.sh:ro
+    entrypoint: ["/bin/sh", "/init_dynamodb.sh"]
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: tdse-auth-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://user:pass@postgres:5432/tdse}
+      JWT_SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      JWT_ALGORITHM: HS256
+      CREATE_DB_TABLES_ON_STARTUP: "false"
+
+  upload-service:
+    build:
+      context: ./services/upload-service
+      dockerfile: Dockerfile
+    container_name: tdse-upload-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8002:8000"
+    environment:
+      JWT_SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      JWT_ALGORITHM: HS256
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET_NAME: ${S3_BUCKET:-tdse-images}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_KEY:-minioadmin}
+
+  preprocessing-service:
+    build:
+      context: ./services/preprocessing-service
+      dockerfile: Dockerfile
+    container_name: tdse-preprocessing-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8003:8000"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET_NAME: ${S3_BUCKET:-tdse-images}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_KEY:-minioadmin}
+
+  inference-service:
+    build:
+      context: .
+      dockerfile: services/inference-service/Dockerfile
+    container_name: tdse-inference-service
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      dynamodb-init:
+        condition: service_completed_successfully
+    ports:
+      - "8004:8000"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET_NAME: ${S3_BUCKET:-tdse-images}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_KEY:-minioadmin}
+      DYNAMODB_ENDPOINT_URL: ${DYNAMODB_ENDPOINT:-http://dynamodb-local:8000}
+      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE:-inference-results}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/emotion_model.pt}
+      DEVICE: cpu
+      USE_DUMMY_MODEL_IF_MISSING: "true"
+    volumes:
+      - ./models:/app/models:ro
+
+  results-service:
+    build:
+      context: ./services/results-service
+      dockerfile: Dockerfile
+    container_name: tdse-results-service
+    depends_on:
+      dynamodb-init:
+        condition: service_completed_successfully
+    ports:
+      - "8005:8000"
+    environment:
+      JWT_SECRET_KEY: ${SECRET_KEY:-dev-secret-key-change-in-production}
+      JWT_ALGORITHM: HS256
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_KEY:-minioadmin}
+      DYNAMODB_ENDPOINT_URL: ${DYNAMODB_ENDPOINT:-http://dynamodb-local:8000}
+      DYNAMODB_TABLE_NAME: ${DYNAMODB_TABLE:-inference-results}
+
+volumes:
+  postgres_data:
+  minio_data:
