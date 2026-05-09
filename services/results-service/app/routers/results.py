@@ -69,5 +69,6 @@ async def get_result(
     result = ResultsService().get_result(
         image_id=image_id,
         tenant_id=auth_context["tenant_id"],
+        user_id=auth_context["user_id"],
     )
     return ResultResponse.model_validate(result)

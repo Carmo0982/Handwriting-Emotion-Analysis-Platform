@@ -18,9 +18,14 @@ EMOTION_CLASSES: tuple[str, str, str, str] = (
 
 
 class ResultsService:
-    def get_result(self, image_id: str, tenant_id: UUID) -> dict[str, Any]:
+    def get_result(
+        self,
+        image_id: str,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> dict[str, Any]:
         result = get_result_by_id(image_id=image_id, tenant_id=str(tenant_id))
-        if result is None:
+        if result is None or str(result.get("user_id")) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Result not found",
