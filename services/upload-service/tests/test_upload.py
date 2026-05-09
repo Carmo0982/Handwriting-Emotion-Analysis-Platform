@@ -1,164 +1,238 @@
-from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from __future__ import annotations
+
 from typing import Any
-from uuid import UUID
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from jose import jwt
+from httpx import AsyncClient
 
-from app.core.config import settings
-from app.main import app
-from app.services.upload_service import clear_image_status_store
-
-
-TEST_USER_ID = UUID("22222222-2222-2222-2222-222222222222")
-TEST_TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def reset_status_store() -> AsyncIterator[None]:
-    clear_image_status_store()
-    yield
-    clear_image_status_store()
-
-
-@pytest_asyncio.fixture()
-async def client() -> AsyncIterator[AsyncClient]:
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://testserver",
-    ) as async_client:
-        yield async_client
-
-
-def make_token(
-    user_id: UUID = TEST_USER_ID,
-    tenant_id: UUID = TEST_TENANT_ID,
-) -> str:
-    now = datetime.now(timezone.utc)
-    return jwt.encode(
-        {
-            "sub": str(user_id),
-            "tenant_id": str(tenant_id),
-            "iat": now,
-            "exp": now + timedelta(minutes=15),
-        },
-        settings.jwt_secret_key,
-        algorithm=settings.jwt_algorithm,
-    )
-
-
-def auth_headers(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+from conftest import (
+    OTHER_TENANT_ID,
+    TEST_BUCKET,
+    TEST_TENANT_ID,
+    TEST_USER_ID,
+)
 
 
 @pytest.mark.asyncio
-async def test_upload_image_to_s3_and_publish_kafka_event(
+async def test_upload_valid_png_returns_image_id_and_processing_status(
     client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
 ) -> None:
-    token = make_token()
-    image_bytes = b"\x89PNG\r\n\x1a\nvalid-image-bytes"
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("sample.png", sample_png, "image/png")},
+    )
 
-    with patch(
-        "app.services.upload_service.upload_to_s3",
-        return_value="uploaded-key",
-    ) as upload_mock, patch(
-        "app.services.upload_service.publish_event",
-        new_callable=AsyncMock,
-    ) as publish_mock:
-        response = await client.post(
-            "/upload",
-            headers=auth_headers(token),
-            files={"file": ("sample.png", image_bytes, "image/png")},
-        )
-
-    assert response.status_code == 202
+    assert response.status_code == 200
     data = response.json()
-    image_id = UUID(data["image_id"])
+    assert UUID(data["image_id"])
+    assert data["status"] == "processing"
+
+
+@pytest.mark.asyncio
+async def test_upload_valid_jpeg_returns_200(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_jpeg: bytes,
+) -> None:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("sample.jpeg", sample_jpeg, "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_upload_without_token_returns_401(
+    client: AsyncClient,
+    sample_png: bytes,
+) -> None:
+    response = await client.post(
+        "/upload",
+        files={"file": ("sample.png", sample_png, "image/png")},
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_file_returns_400(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("document.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_text_file_returns_400(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_file_larger_than_10mb_returns_400(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    large_file: bytes,
+) -> None:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("large.png", large_file, "image/png")},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_empty_file_returns_400(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_stores_file_in_s3_with_tenant_id_in_path(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_s3: Any,
+) -> None:
+    response = await upload_png(client, auth_headers, sample_png)
+    image_id = response.json()["image_id"]
     expected_key = f"{TEST_TENANT_ID}/{TEST_USER_ID}/{image_id}.png"
 
-    assert data["status"] == "processing"
-    upload_mock.assert_called_once_with(image_bytes, expected_key)
-    publish_mock.assert_awaited_once()
+    s3_response = mock_s3.get_object(Bucket=TEST_BUCKET, Key=expected_key)
 
-    topic, payload = publish_mock.await_args.args
+    assert s3_response["Body"].read() == sample_png
+
+
+@pytest.mark.asyncio
+async def test_upload_s3_key_format_is_tenantid_userid_imageid(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
+) -> None:
+    response = await upload_png(client, auth_headers, sample_png)
+    image_id = response.json()["image_id"]
+    _, payload = mock_kafka.await_args.args
+
+    assert payload["s3_key"] == f"{TEST_TENANT_ID}/{TEST_USER_ID}/{image_id}.png"
+
+
+@pytest.mark.asyncio
+async def test_upload_publishes_kafka_event_with_correct_fields(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
+) -> None:
+    response = await upload_png(client, auth_headers, sample_png)
+    image_id = response.json()["image_id"]
+
+    mock_kafka.assert_awaited_once()
+    topic, payload = mock_kafka.await_args.args
+
     assert topic == "image-uploaded"
-    assert payload["image_id"] == str(image_id)
+    assert payload["image_id"] == image_id
     assert payload["tenant_id"] == str(TEST_TENANT_ID)
     assert payload["user_id"] == str(TEST_USER_ID)
-    assert payload["s3_key"] == "uploaded-key"
+    assert payload["s3_key"] == f"{TEST_TENANT_ID}/{TEST_USER_ID}/{image_id}.png"
     assert "timestamp" in payload
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_unsupported_content_type(
+async def test_upload_kafka_event_contains_image_id(
     client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
 ) -> None:
-    token = make_token()
+    response = await upload_png(client, auth_headers, sample_png)
+    _, payload = mock_kafka.await_args.args
 
-    with patch("app.services.upload_service.upload_to_s3") as upload_mock, patch(
-        "app.services.upload_service.publish_event",
-        new_callable=AsyncMock,
-    ) as publish_mock:
-        response = await client.post(
-            "/upload",
-            headers=auth_headers(token),
-            files={"file": ("notes.txt", b"not-an-image", "text/plain")},
-        )
-
-    assert response.status_code == 415
-    upload_mock.assert_not_called()
-    publish_mock.assert_not_awaited()
+    assert payload["image_id"] == response.json()["image_id"]
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_files_larger_than_10mb(
+async def test_upload_kafka_event_contains_tenant_id(
     client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
 ) -> None:
-    token = make_token()
-    oversized_file = b"x" * (settings.max_upload_size_bytes + 1)
+    await upload_png(client, auth_headers, sample_png)
+    _, payload = mock_kafka.await_args.args
 
-    with patch("app.services.upload_service.upload_to_s3") as upload_mock, patch(
-        "app.services.upload_service.publish_event",
-        new_callable=AsyncMock,
-    ) as publish_mock:
-        response = await client.post(
-            "/upload",
-            headers=auth_headers(token),
-            files={"file": ("sample.png", oversized_file, "image/png")},
-        )
-
-    assert response.status_code == 413
-    upload_mock.assert_not_called()
-    publish_mock.assert_not_awaited()
+    assert payload["tenant_id"] == str(TEST_TENANT_ID)
 
 
 @pytest.mark.asyncio
-async def test_get_upload_status_returns_processing(
+async def test_upload_kafka_event_contains_s3_key(
     client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
 ) -> None:
-    token = make_token()
+    response = await upload_png(client, auth_headers, sample_png)
+    image_id = response.json()["image_id"]
+    _, payload = mock_kafka.await_args.args
 
-    with patch(
-        "app.services.upload_service.upload_to_s3",
-        return_value="uploaded-key",
-    ), patch(
-        "app.services.upload_service.publish_event",
-        new_callable=AsyncMock,
-    ):
-        upload_response = await client.post(
-            "/upload",
-            headers=auth_headers(token),
-            files={"file": ("sample.jpeg", b"jpeg-bytes", "image/jpeg")},
-        )
+    assert payload["s3_key"] == f"{TEST_TENANT_ID}/{TEST_USER_ID}/{image_id}.png"
 
+
+@pytest.mark.asyncio
+async def test_upload_generates_unique_image_id_per_request(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+) -> None:
+    first_response = await upload_png(client, auth_headers, sample_png)
+    second_response = await upload_png(client, auth_headers, sample_png)
+
+    assert first_response.json()["image_id"] != second_response.json()["image_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_status_returns_processing_for_new_image(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+) -> None:
+    upload_response = await upload_png(client, auth_headers, sample_png)
     image_id = upload_response.json()["image_id"]
+
     response = await client.get(
         f"/upload/{image_id}/status",
-        headers=auth_headers(token),
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -166,11 +240,72 @@ async def test_get_upload_status_returns_processing(
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_invalid_token(client: AsyncClient) -> None:
-    response = await client.post(
-        "/upload",
-        headers=auth_headers("invalid-token"),
-        files={"file": ("sample.png", b"image", "image/png")},
+async def test_get_status_nonexistent_image_returns_404(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    response = await client.get(
+        f"/upload/{uuid4()}/status",
+        headers=auth_headers,
     )
 
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_status_without_token_returns_401(client: AsyncClient) -> None:
+    response = await client.get(f"/upload/{uuid4()}/status")
+
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_s3_key_always_starts_with_tenant_id(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_kafka: AsyncMock,
+) -> None:
+    await upload_png(client, auth_headers, sample_png)
+    _, payload = mock_kafka.await_args.args
+
+    assert payload["s3_key"].startswith(f"{TEST_TENANT_ID}/")
+
+
+@pytest.mark.asyncio
+async def test_two_tenants_upload_to_different_s3_paths(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+    mock_current_user: dict[str, UUID],
+    mock_s3: Any,
+) -> None:
+    first_response = await upload_png(client, auth_headers, sample_png)
+    first_image_id = first_response.json()["image_id"]
+
+    mock_current_user["tenant_id"] = OTHER_TENANT_ID
+    second_response = await upload_png(client, auth_headers, sample_png)
+    second_image_id = second_response.json()["image_id"]
+
+    first_key = f"{TEST_TENANT_ID}/{TEST_USER_ID}/{first_image_id}.png"
+    second_key = f"{OTHER_TENANT_ID}/{TEST_USER_ID}/{second_image_id}.png"
+    s3_objects = mock_s3.list_objects_v2(Bucket=TEST_BUCKET)["Contents"]
+    keys = {item["Key"] for item in s3_objects}
+
+    assert first_key in keys
+    assert second_key in keys
+    assert first_key.split("/")[0] != second_key.split("/")[0]
+
+
+async def upload_png(
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+    sample_png: bytes,
+) -> Any:
+    response = await client.post(
+        "/upload",
+        headers=auth_headers,
+        files={"file": ("sample.png", sample_png, "image/png")},
+    )
+    assert response.status_code == 200
+    return response

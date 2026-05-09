@@ -21,7 +21,7 @@ class AuthService:
         tenant = await self.session.get(Tenant, payload.tenant_id)
         if tenant is None or not tenant.is_active:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tenant not found or inactive",
             )
 
@@ -31,7 +31,7 @@ class AuthService:
         )
         if existing_user is not None:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email is already registered",
             )
 
@@ -49,7 +49,7 @@ class AuthService:
         except IntegrityError as exc:
             await self.session.rollback()
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email is already registered",
             ) from exc
 

@@ -41,7 +41,7 @@ class UploadService:
     ) -> UploadResponse:
         if file.content_type not in settings.allowed_content_types:
             raise HTTPException(
-                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only image/png and image/jpeg files are allowed",
             )
 
@@ -53,7 +53,7 @@ class UploadService:
             )
         if len(file_bytes) > settings.max_upload_size_bytes:
             raise HTTPException(
-                status_code=413,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Uploaded file exceeds the 10MB limit",
             )
 
