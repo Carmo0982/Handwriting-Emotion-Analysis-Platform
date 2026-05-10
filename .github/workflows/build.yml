@@ -1,0 +1,122 @@
+name: Build — Construcción de imágenes Docker
+
+on:
+  workflow_run:
+    workflows: ["CI — Tests y validación"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  build-and-push:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - auth-service
+          - upload-service
+          - preprocessing-service
+          - inference-service
+          - results-service
+          - tenant-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.IMAGE_SHA }}
+
+      - name: Resolve Dockerfile and context
+        id: docker
+        run: |
+          service="${{ matrix.service }}"
+          if [ "$service" = "inference-service" ]; then
+            dockerfile="services/inference-service/Dockerfile.gpu"
+            context="."
+          else
+            dockerfile="services/${service}/Dockerfile"
+            context="services/${service}"
+          fi
+
+          if [ ! -f "$dockerfile" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Service ${service} has no Dockerfile yet; skipping." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
+          echo "context=$context" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        if: steps.docker.outputs.skip != 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        if: steps.docker.outputs.skip != 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        if: steps.docker.outputs.skip != 'true'
+        run: |
+          image="${{ secrets.ECR_REGISTRY }}/tdse/${{ matrix.service }}"
+          docker build \
+            -f "${{ steps.docker.outputs.dockerfile }}" \
+            -t "${image}:latest" \
+            -t "${image}:sha-${IMAGE_SHA}" \
+            "${{ steps.docker.outputs.context }}"
+
+      - name: Push image
+        if: steps.docker.outputs.skip != 'true'
+        run: |
+          image="${{ secrets.ECR_REGISTRY }}/tdse/${{ matrix.service }}"
+          docker push "${image}:latest"
+          docker push "${image}:sha-${IMAGE_SHA}"
+          echo "${{ matrix.service }}=${image}:sha-${IMAGE_SHA}" > "image-${{ matrix.service }}.txt"
+
+      - name: Upload image artifact
+        if: steps.docker.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: image-${{ matrix.service }}.txt
+
+  build-summary:
+    if: always() && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: image-artifacts
+
+      - name: Generate summary
+        run: |
+          {
+            echo "# TDSE image build summary"
+            echo
+            echo "Commit: ${IMAGE_SHA}"
+            echo
+            if find image-artifacts -name 'image-*.txt' -print -quit | grep -q .; then
+              find image-artifacts -name 'image-*.txt' -print0 | xargs -0 cat
+            else
+              echo "No images were built."
+            fi
+          } | tee build-summary.md
+
+      - name: Upload build summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-summary
+          path: build-summary.md

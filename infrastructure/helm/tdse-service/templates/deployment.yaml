@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tdse-service.name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "tdse-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "tdse-service.name" . }}
+  template:
+    metadata:
+      labels:
+        {{- include "tdse-service.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccountName }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "tdse-service.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+          envFrom:
+            {{- if .Values.config }}
+            - configMapRef:
+                name: {{ include "tdse-service.name" . }}-config
+            {{- end }}
+            {{- if .Values.externalSecret.enabled }}
+            - secretRef:
+                name: {{ include "tdse-service.name" . }}-secrets
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.readinessProbe.path }}
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.livenessProbe.path }}
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.persistence.enabled }}
+          volumeMounts:
+            - name: model-volume
+              mountPath: {{ .Values.persistence.mountPath }}
+              readOnly: {{ .Values.persistence.readOnly }}
+          {{- end }}
+      {{- if .Values.persistence.enabled }}
+      volumes:
+        - name: model-volume
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.claimName }}
+      {{- end }}

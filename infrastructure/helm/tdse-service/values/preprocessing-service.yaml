@@ -1,0 +1,22 @@
+nameOverride: preprocessing-service
+replicaCount: 2
+config:
+  ENVIRONMENT: production
+  AWS_REGION: us-east-1
+  S3_BUCKET_NAME: tdse-production-handwriting-images
+  S3_ENDPOINT_URL: ""
+  KAFKA_BOOTSTRAP_SERVERS: b-1.tdse-msk.example:9094,b-2.tdse-msk.example:9094
+  KAFKA_SECURITY_PROTOCOL: SSL
+  KAFKA_TOPIC_IMAGE_UPLOADED: image-uploaded
+  KAFKA_TOPIC_IMAGE_PREPROCESSED: image-preprocessed
+  KAFKA_GROUP_ID: preprocessing-group
+externalSecret:
+  enabled: false
+  data: []
+resources:
+  requests:
+    cpu: 300m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

@@ -1,0 +1,20 @@
+nameOverride: results-service
+replicaCount: 2
+config:
+  ENVIRONMENT: production
+  JWT_ALGORITHM: HS256
+  AWS_REGION: us-east-1
+  DYNAMODB_TABLE_NAME: inference-results
+  DYNAMODB_ENDPOINT_URL: ""
+externalSecret:
+  data:
+    - secretKey: JWT_SECRET_KEY
+      remoteRef:
+        key: /tdse/production/jwt-secret-key
+resources:
+  requests:
+    cpu: 150m
+    memory: 256Mi
+  limits:
+    cpu: 750m
+    memory: 768Mi

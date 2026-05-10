@@ -7,11 +7,13 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from kafka import KafkaConsumer
 
 from app.core.config import settings
 from app.core.results_store import save_result
+from app.core.storage import get_s3_client
 from app.core.storage import download_from_s3
 
 
@@ -178,7 +180,7 @@ class InferenceConsumer:
 
 
 def load_inference_engine() -> PredictionEngine:
-    model_path = Path(settings.model_path)
+    model_path = _resolve_model_path(settings.model_path)
     if model_path.exists():
         from ml.inference.engine import InferenceEngine
 
@@ -197,3 +199,30 @@ def load_inference_engine() -> PredictionEngine:
 
 def is_model_available() -> bool:
     return settings.model_file_exists or settings.use_dummy_model_if_missing
+
+
+def _resolve_model_path(model_path: str) -> Path:
+    if model_path.startswith("s3://"):
+        return _download_model_from_s3(model_path)
+    return Path(model_path)
+
+
+def _download_model_from_s3(model_uri: str) -> Path:
+    parsed_uri = urlparse(model_uri)
+    bucket = parsed_uri.netloc
+    key = parsed_uri.path.lstrip("/")
+    if not bucket or not key:
+        raise ValueError(f"Invalid S3 model URI: {model_uri}")
+
+    cache_dir = Path(settings.model_cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    local_path = cache_dir / Path(key).name
+
+    if local_path.exists():
+        logger.info("Using cached inference model from %s", local_path)
+        return local_path
+
+    logger.info("Downloading inference model from %s", model_uri)
+    response = get_s3_client().get_object(Bucket=bucket, Key=key)
+    local_path.write_bytes(response["Body"].read())
+    return local_path

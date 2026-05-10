@@ -1,0 +1,23 @@
+nameOverride: upload-service
+replicaCount: 2
+config:
+  ENVIRONMENT: production
+  JWT_ALGORITHM: HS256
+  AWS_REGION: us-east-1
+  S3_BUCKET_NAME: tdse-production-handwriting-images
+  S3_ENDPOINT_URL: ""
+  KAFKA_BOOTSTRAP_SERVERS: b-1.tdse-msk.example:9094,b-2.tdse-msk.example:9094
+  KAFKA_SECURITY_PROTOCOL: SSL
+  KAFKA_TOPIC_IMAGE_UPLOADED: image-uploaded
+externalSecret:
+  data:
+    - secretKey: JWT_SECRET_KEY
+      remoteRef:
+        key: /tdse/production/jwt-secret-key
+resources:
+  requests:
+    cpu: 150m
+    memory: 256Mi
+  limits:
+    cpu: 750m
+    memory: 768Mi

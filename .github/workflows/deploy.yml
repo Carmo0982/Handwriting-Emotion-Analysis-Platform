@@ -1,0 +1,227 @@
+name: Deploy — Despliegue a EKS
+
+on:
+  workflow_run:
+    workflows: ["Build — Construcción de imágenes Docker"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+      service:
+        description: Service to deploy
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - auth-service
+          - upload-service
+          - preprocessing-service
+          - inference-service
+          - results-service
+          - tenant-service
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  NAMESPACE: tdse
+  CHART_PATH: infrastructure/helm/tdse-service
+
+jobs:
+  deploy:
+    if: >
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.service == 'all' || inputs.service == matrix.service)) ||
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - auth-service
+          - upload-service
+          - preprocessing-service
+          - inference-service
+          - results-service
+          - tenant-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.IMAGE_SHA }}
+
+      - name: Skip missing service implementation
+        id: service
+        run: |
+          if [ ! -f "services/${{ matrix.service }}/Dockerfile" ] && [ "${{ matrix.service }}" != "inference-service" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "${{ matrix.service }} has no Dockerfile yet; skipping deploy." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        if: steps.service.outputs.skip != 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Configure kubectl
+        if: steps.service.outputs.skip != 'true'
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Setup Helm
+        if: steps.service.outputs.skip != 'true'
+        uses: azure/setup-helm@v4
+
+      - name: Ensure namespace exists
+        if: steps.service.outputs.skip != 'true'
+        run: |
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy service with Helm
+        if: steps.service.outputs.skip != 'true'
+        id: helm
+        run: |
+          service="${{ matrix.service }}"
+          release="tdse-${service}"
+          image="${{ secrets.ECR_REGISTRY }}/tdse/${service}"
+
+          helm upgrade --install "$release" "$CHART_PATH" \
+            --namespace "$NAMESPACE" \
+            --values "$CHART_PATH/values/${service}.yaml" \
+            --set "image.repository=${image}" \
+            --set "image.tag=sha-${IMAGE_SHA}" \
+            --wait \
+            --timeout 5m
+
+      - name: Wait for rollout
+        if: steps.service.outputs.skip != 'true'
+        id: rollout
+        run: |
+          kubectl -n "$NAMESPACE" rollout status \
+            "deployment/${{ matrix.service }}" \
+            --timeout=300s
+
+      - name: Health check from inside cluster
+        if: steps.service.outputs.skip != 'true'
+        id: health
+        run: |
+          service="${{ matrix.service }}"
+          for attempt in 1 2 3; do
+            if kubectl -n "$NAMESPACE" run "health-${service}-${GITHUB_RUN_ID}-${attempt}" \
+              --rm -i --restart=Never \
+              --image=curlimages/curl:8.8.0 \
+              --command -- curl -fsS "http://${service}/health"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
+
+      - name: Rollback failed deployment
+        if: failure() && steps.service.outputs.skip != 'true'
+        run: |
+          release="tdse-${{ matrix.service }}"
+          helm -n "$NAMESPACE" rollback "$release" || helm -n "$NAMESPACE" uninstall "$release"
+
+  integration-tests:
+    needs: deploy
+    runs-on: ubuntu-latest
+    env:
+      AUTH_URL: http://localhost:8001
+      UPLOAD_URL: http://localhost:8002
+      PREPROCESSING_URL: http://localhost:8003
+      INFERENCE_URL: http://localhost:8004
+      RESULTS_URL: http://localhost:8005
+      TEST_TENANT_A_ID: ${{ secrets.TEST_TENANT_A_ID }}
+      TEST_TENANT_B_ID: ${{ secrets.TEST_TENANT_B_ID }}
+      NAMESPACE: tdse
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.IMAGE_SHA }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install e2e dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx numpy opencv-python-headless
+
+      - name: Port-forward services
+        run: |
+          nohup kubectl -n "$NAMESPACE" port-forward service/auth-service 8001:80 >/tmp/auth-port-forward.log 2>&1 &
+          nohup kubectl -n "$NAMESPACE" port-forward service/upload-service 8002:80 >/tmp/upload-port-forward.log 2>&1 &
+          nohup kubectl -n "$NAMESPACE" port-forward service/preprocessing-service 8003:80 >/tmp/preprocessing-port-forward.log 2>&1 &
+          nohup kubectl -n "$NAMESPACE" port-forward service/inference-service 8004:80 >/tmp/inference-port-forward.log 2>&1 &
+          nohup kubectl -n "$NAMESPACE" port-forward service/results-service 8005:80 >/tmp/results-port-forward.log 2>&1 &
+          sleep 10
+
+      - name: Run end-to-end tests
+        run: |
+          pytest tests/e2e/test_full_pipeline.py tests/e2e/test_tenant_isolation.py -q
+
+      - name: Rollback all deployed services after e2e failure
+        if: failure()
+        run: |
+          for service in auth-service upload-service preprocessing-service inference-service results-service tenant-service; do
+            helm -n "$NAMESPACE" rollback "tdse-${service}" || true
+          done
+
+  notify:
+    if: always()
+    needs:
+      - deploy
+      - integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write deployment summary
+        run: |
+          {
+            echo "# TDSE deployment"
+            echo
+            echo "Commit: ${IMAGE_SHA}"
+            echo "Deploy result: ${{ needs.deploy.result }}"
+            echo "Integration tests: ${{ needs.integration-tests.result }}"
+            echo
+            if [ "${{ needs.integration-tests.result }}" = "success" ]; then
+              echo "Deployment completed successfully."
+            else
+              echo "Deployment failed. Review failed jobs above for the service and rollback details."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,66 @@
+nameOverride: ""
+namespace: tdse
+replicaCount: 2
+
+image:
+  repository: ""
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccountName: tdse-service-account
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+config: {}
+
+externalSecret:
+  enabled: true
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  data: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector:
+  node-type: cpu
+
+tolerations: []
+
+readinessProbe:
+  path: /health
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+livenessProbe:
+  path: /health
+  initialDelaySeconds: 30
+  periodSeconds: 20
+
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  averageUtilization: 70
+
+persistence:
+  enabled: false
+  claimName: ""
+  mountPath: ""
+  readOnly: true
+
+ingress:
+  enabled: false
+  host: api.tdse.example.com
+  certificateArn: ""
+  paths: []

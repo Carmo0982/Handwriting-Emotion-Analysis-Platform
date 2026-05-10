@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import argparse
+import json
 import logging
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -237,3 +239,82 @@ def _resolve_device(device: Optional[str | torch.device]) -> torch.device:
             return torch.device("cpu")
         return requested_device
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().tolist()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe(child)
+            for key, child in value.items()
+            if key != "model_state_dict"
+        }
+    if isinstance(value, list):
+        return [_json_safe(child) for child in value]
+    if isinstance(value, tuple):
+        return [_json_safe(child) for child in value]
+    return value
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train the TDSE emotion classifier.")
+    parser.add_argument("--data-dir", required=True, help="Dataset root directory.")
+    parser.add_argument("--epochs", type=int, default=50, help="Training epochs.")
+    parser.add_argument("--k-folds", type=int, default=5, help="Number of K-Folds.")
+    parser.add_argument(
+        "--checkpoint-dir",
+        default="checkpoints",
+        help="Directory for fold checkpoints.",
+    )
+    parser.add_argument(
+        "--metrics-output",
+        default="training_metrics.json",
+        help="Path where JSON metrics will be written.",
+    )
+    parser.add_argument("--batch-size", type=int, default=16, help="Batch size.")
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=2,
+        help="DataLoader worker count.",
+    )
+    parser.add_argument("--device", default=None, help="Torch device, e.g. cpu or cuda.")
+    return parser.parse_args()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    args = _parse_args()
+
+    dataset = HandwritingDataset(args.data_dir)
+    if len(dataset) == 0:
+        raise ValueError(f"No training samples found in {args.data_dir}")
+
+    result = run_kfold_training(
+        dataset=dataset,
+        k=args.k_folds,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        checkpoint_dir=args.checkpoint_dir,
+        device=args.device,
+        num_workers=args.num_workers,
+    )
+
+    metrics_path = Path(args.metrics_output)
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_path.write_text(
+        json.dumps(_json_safe(result), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    logger.info("Training metrics written to %s", metrics_path)
+
+
+if __name__ == "__main__":
+    main()

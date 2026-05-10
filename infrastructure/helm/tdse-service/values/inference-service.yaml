@@ -1,0 +1,53 @@
+nameOverride: inference-service
+replicaCount: 1
+config:
+  ENVIRONMENT: production
+  AWS_REGION: us-east-1
+  S3_BUCKET_NAME: tdse-production-handwriting-images
+  S3_ENDPOINT_URL: ""
+  DYNAMODB_TABLE_NAME: inference-results
+  DYNAMODB_ENDPOINT_URL: ""
+  MODEL_PATH: /app/models/emotion_model.pt
+  DEVICE: cuda
+  USE_DUMMY_MODEL_IF_MISSING: "false"
+  KAFKA_BOOTSTRAP_SERVERS: b-1.tdse-msk.example:9094,b-2.tdse-msk.example:9094
+  KAFKA_SECURITY_PROTOCOL: SSL
+  KAFKA_TOPIC_IMAGE_PREPROCESSED: image-preprocessed
+  KAFKA_GROUP_ID: inference-group
+externalSecret:
+  enabled: false
+  data: []
+nodeSelector:
+  node-type: gpu
+tolerations:
+  - key: nvidia.com/gpu
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+resources:
+  requests:
+    cpu: "1"
+    memory: 4Gi
+    nvidia.com/gpu: "1"
+  limits:
+    cpu: "2"
+    memory: 8Gi
+    nvidia.com/gpu: "1"
+persistence:
+  enabled: true
+  claimName: tdse-model-pvc
+  mountPath: /app/models
+  readOnly: true
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 8
+  averageUtilization: 70
+readinessProbe:
+  path: /health
+  initialDelaySeconds: 20
+  periodSeconds: 10
+livenessProbe:
+  path: /health
+  initialDelaySeconds: 60
+  periodSeconds: 30

@@ -1,0 +1,21 @@
+nameOverride: auth-service
+replicaCount: 2
+config:
+  ENVIRONMENT: production
+  JWT_ALGORITHM: HS256
+  CREATE_DB_TABLES_ON_STARTUP: "false"
+externalSecret:
+  data:
+    - secretKey: DATABASE_URL
+      remoteRef:
+        key: /tdse/production/database-url
+    - secretKey: JWT_SECRET_KEY
+      remoteRef:
+        key: /tdse/production/jwt-secret-key
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

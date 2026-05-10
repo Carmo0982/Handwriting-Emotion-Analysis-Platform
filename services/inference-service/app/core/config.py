@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     environment: str = "local"
 
     model_path: str = "models/emotion_classifier.pt"
+    model_cache_dir: str = "/tmp/tdse-models"
     device: str = "cpu"
     use_dummy_model_if_missing: bool = True
 
@@ -47,6 +48,8 @@ class Settings(BaseSettings):
 
     @property
     def model_file_exists(self) -> bool:
+        if self.model_path.startswith("s3://"):
+            return True
         return Path(self.model_path).exists()
 
 
