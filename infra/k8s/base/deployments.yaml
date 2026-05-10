@@ -1,0 +1,341 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: tdse
+  labels:
+    app.kubernetes.io/name: auth-service
+    app.kubernetes.io/part-of: tdse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth-service
+        app.kubernetes.io/part-of: tdse
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        tdse/node-pool: cpu
+      containers:
+        - name: auth-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse-auth-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: DATABASE_URL
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: JWT_SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: tdse-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: upload-service
+  namespace: tdse
+  labels:
+    app.kubernetes.io/name: upload-service
+    app.kubernetes.io/part-of: tdse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: upload-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: upload-service
+        app.kubernetes.io/part-of: tdse
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        tdse/node-pool: cpu
+      containers:
+        - name: upload-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse-upload-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: JWT_SECRET_KEY
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: tdse-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessing-service
+  namespace: tdse
+  labels:
+    app.kubernetes.io/name: preprocessing-service
+    app.kubernetes.io/part-of: tdse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: preprocessing-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: preprocessing-service
+        app.kubernetes.io/part-of: tdse
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        tdse/node-pool: cpu
+      containers:
+        - name: preprocessing-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse-preprocessing-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: tdse-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-service
+  namespace: tdse
+  labels:
+    app.kubernetes.io/name: inference-service
+    app.kubernetes.io/part-of: tdse
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: inference-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: inference-service
+        app.kubernetes.io/part-of: tdse
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        tdse/node-pool: gpu
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: inference-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse-inference-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: tdse-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "2"
+              memory: 8Gi
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: model-volume
+              mountPath: /app/models
+              readOnly: true
+      volumes:
+        - name: model-volume
+          persistentVolumeClaim:
+            claimName: tdse-model-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: results-service
+  namespace: tdse
+  labels:
+    app.kubernetes.io/name: results-service
+    app.kubernetes.io/part-of: tdse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: results-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: results-service
+        app.kubernetes.io/part-of: tdse
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        tdse/node-pool: cpu
+      containers:
+        - name: results-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse-results-service:v1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: JWT_SECRET_KEY
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: tdse-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+          envFrom:
+            - configMapRef:
+                name: tdse-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi

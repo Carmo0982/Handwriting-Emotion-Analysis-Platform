@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tdse
+  labels:
+    app.kubernetes.io/name: tdse
+    app.kubernetes.io/part-of: handwriting-emotion-analysis-platform

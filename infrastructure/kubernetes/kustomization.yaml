@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - cluster-secret-store.yaml
+  - model-pvc.yaml
+  - auth-service/manifests.yaml
+  - upload-service/manifests.yaml
+  - preprocessing-service/manifests.yaml
+  - inference-service/manifests.yaml
+  - results-service/manifests.yaml
+  - tenant-service/manifests.yaml
+  - ingress.yaml

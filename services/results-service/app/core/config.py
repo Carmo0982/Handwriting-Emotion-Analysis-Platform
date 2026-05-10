@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
 
     aws_region: str = "us-east-1"
-    aws_access_key_id: str = "minioadmin"
-    aws_secret_access_key: str = "minioadmin"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     dynamodb_table_name: str = "inference-results"
     dynamodb_endpoint_url: str = ""
 

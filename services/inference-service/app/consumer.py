@@ -119,6 +119,7 @@ class InferenceConsumer:
         return KafkaConsumer(
             settings.kafka_topic_image_preprocessed,
             bootstrap_servers=settings.kafka_bootstrap_servers_list,
+            security_protocol=settings.kafka_security_protocol,
             group_id=settings.kafka_group_id,
             enable_auto_commit=False,
             auto_offset_reset=settings.kafka_auto_offset_reset,

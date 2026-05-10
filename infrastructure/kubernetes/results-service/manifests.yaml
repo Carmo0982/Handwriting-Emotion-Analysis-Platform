@@ -1,0 +1,113 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: results-service-config
+  namespace: tdse
+data:
+  ENVIRONMENT: "production"
+  JWT_ALGORITHM: "HS256"
+  AWS_REGION: "us-east-1"
+  DYNAMODB_TABLE_NAME: "inference-results"
+  DYNAMODB_ENDPOINT_URL: ""
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: results-service-secrets
+  namespace: tdse
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: results-service-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: JWT_SECRET_KEY
+      remoteRef:
+        key: /tdse/production/jwt-secret-key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: results-service
+  namespace: tdse
+  labels:
+    app: results-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: results-service
+  template:
+    metadata:
+      labels:
+        app: results-service
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        node-type: cpu
+      containers:
+        - name: results-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse/results-service:v1.0.0
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: results-service-config
+            - secretRef:
+                name: results-service-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: results-service
+  namespace: tdse
+spec:
+  type: ClusterIP
+  selector:
+    app: results-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: results-service
+  namespace: tdse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: results-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

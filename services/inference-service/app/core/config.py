@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     use_dummy_model_if_missing: bool = True
 
     kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_security_protocol: str = "PLAINTEXT"
     kafka_topic_image_preprocessed: str = "image-preprocessed"
     kafka_group_id: str = "inference-group"
     kafka_auto_offset_reset: str = "earliest"
@@ -22,8 +23,8 @@ class Settings(BaseSettings):
 
     s3_bucket_name: str = "tdse-handwriting-images"
     aws_region: str = "us-east-1"
-    aws_access_key_id: str = "minioadmin"
-    aws_secret_access_key: str = "minioadmin"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     s3_endpoint_url: str = ""
 
     dynamodb_table_name: str = "inference-results"

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     environment: str = "local"
 
     kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_security_protocol: str = "PLAINTEXT"
     kafka_topic_image_uploaded: str = "image-uploaded"
     kafka_topic_image_preprocessed: str = "image-preprocessed"
     kafka_group_id: str = "preprocessing-group"
@@ -18,8 +19,8 @@ class Settings(BaseSettings):
 
     s3_bucket_name: str = "tdse-handwriting-images"
     aws_region: str = "us-east-1"
-    aws_access_key_id: str = "minioadmin"
-    aws_secret_access_key: str = "minioadmin"
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
     s3_endpoint_url: str = "http://localhost:9000"
 
     model_config = SettingsConfigDict(

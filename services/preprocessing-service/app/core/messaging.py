@@ -10,6 +10,7 @@ def create_kafka_consumer() -> Any:
     return KafkaConsumer(
         settings.kafka_topic_image_uploaded,
         bootstrap_servers=settings.kafka_bootstrap_servers_list,
+        security_protocol=settings.kafka_security_protocol,
         group_id=settings.kafka_group_id,
         enable_auto_commit=False,
         auto_offset_reset=settings.kafka_auto_offset_reset,
@@ -22,6 +23,7 @@ def create_kafka_producer() -> Any:
 
     return KafkaProducer(
         bootstrap_servers=settings.kafka_bootstrap_servers_list,
+        security_protocol=settings.kafka_security_protocol,
         value_serializer=lambda value: json.dumps(value).encode("utf-8"),
     )
 

@@ -3,3 +3,9 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 .env
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan

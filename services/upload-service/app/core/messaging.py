@@ -9,6 +9,7 @@ async def publish_event(topic: str, payload: dict[str, Any]) -> None:
 
     producer = AIOKafkaProducer(
         bootstrap_servers=settings.kafka_bootstrap_servers,
+        security_protocol=settings.kafka_security_protocol,
         value_serializer=lambda value: json.dumps(value).encode("utf-8"),
     )
     await producer.start()

@@ -1,0 +1,117 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: preprocessing-service-config
+  namespace: tdse
+data:
+  ENVIRONMENT: "production"
+  AWS_REGION: "us-east-1"
+  S3_BUCKET_NAME: "tdse-production-handwriting-images"
+  S3_ENDPOINT_URL: ""
+  KAFKA_BOOTSTRAP_SERVERS: "b-1.tdse-msk.example:9094,b-2.tdse-msk.example:9094"
+  KAFKA_SECURITY_PROTOCOL: "SSL"
+  KAFKA_TOPIC_IMAGE_UPLOADED: "image-uploaded"
+  KAFKA_TOPIC_IMAGE_PREPROCESSED: "image-preprocessed"
+  KAFKA_GROUP_ID: "preprocessing-group"
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: preprocessing-service-secrets
+  namespace: tdse
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  target:
+    name: preprocessing-service-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: JWT_SECRET_KEY
+      remoteRef:
+        key: /tdse/production/jwt-secret-key
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preprocessing-service
+  namespace: tdse
+  labels:
+    app: preprocessing-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: preprocessing-service
+  template:
+    metadata:
+      labels:
+        app: preprocessing-service
+    spec:
+      serviceAccountName: tdse-service-account
+      nodeSelector:
+        node-type: cpu
+      containers:
+        - name: preprocessing-service
+          image: <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/tdse/preprocessing-service:v1.0.0
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: preprocessing-service-config
+            - secretRef:
+                name: preprocessing-service-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 300m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: preprocessing-service
+  namespace: tdse
+spec:
+  type: ClusterIP
+  selector:
+    app: preprocessing-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: preprocessing-service
+  namespace: tdse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: preprocessing-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
