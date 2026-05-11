@@ -4,8 +4,12 @@ __pycache__/
 *.py[cod]
 .env
 .terraform/
+node_modules/
+dist/
+.codex_tmp/
 *.tfstate
 *.tfstate.*
 crash.log
 crash.*.log
 *.tfplan
+.codex_temp/
