@@ -2,13 +2,13 @@ import { useMemo, useState } from "react";
 
 import Dashboard from "./components/dashboard/Dashboard.jsx";
 import AppShell from "./components/layout/AppShell.jsx";
-import { initialHistory, tenants } from "./data/mockData.js";
+import { tenants } from "./data/mockData.js";
 import { useThemeMode } from "./hooks/useThemeMode.js";
 
 export default function App() {
   const { mode, toggleMode } = useThemeMode();
   const [tenantId, setTenantId] = useState(tenants[0].id);
-  const [history, setHistory] = useState(initialHistory);
+  const [history, setHistory] = useState([]);
 
   const tenant = useMemo(
     () => tenants.find((item) => item.id === tenantId) ?? tenants[0],

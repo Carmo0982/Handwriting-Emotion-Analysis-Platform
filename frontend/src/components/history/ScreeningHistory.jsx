@@ -9,8 +9,8 @@ export default function ScreeningHistory({ history }) {
       <Card.Header>
         <div className="flex w-full flex-wrap items-start justify-between gap-3">
           <div>
-            <Card.Title>Dashboard de Analisis</Card.Title>
-            <Card.Description>Ultimos diagnosticos preventivos por tenant</Card.Description>
+            <Card.Title>Historial de análisis</Card.Title>
+            <Card.Description>Últimos análisis por organización</Card.Description>
           </div>
           <Chip color="accent" variant="soft">
             {history.length} registros
@@ -24,7 +24,7 @@ export default function ScreeningHistory({ history }) {
             <div className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.2fr] gap-3 px-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
               <span>Paciente</span>
               <span>Fecha</span>
-              <span>Prediccion</span>
+              <span>Predicción</span>
               <span>Confianza</span>
               <span>Biomarcador dominante</span>
             </div>
@@ -48,7 +48,6 @@ function HistoryRow({ item }) {
     <article className="grid grid-cols-[1.1fr_1fr_1fr_1fr_1.2fr] items-center gap-3 rounded-lg border border-border/70 bg-surface-secondary/64 px-3 py-3">
       <div>
         <p className="font-semibold">{item.patientRef}</p>
-        <p className="text-xs text-muted">{item.id}</p>
       </div>
 
       <div className="flex items-center gap-2 text-sm">
@@ -85,9 +84,9 @@ function formatDate(value) {
 
 function biomarkerName(key) {
   const names = {
-    pressure: "Presion",
+    pressure: "Presión",
     rhythm: "Ritmo",
-    slant: "Inclinacion",
+    slant: "Inclinación",
     spacing: "Espaciado",
     strokeVariability: "Variabilidad",
   };

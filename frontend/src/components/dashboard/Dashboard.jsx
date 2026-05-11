@@ -1,60 +1,66 @@
 import { Card, Chip } from "@heroui/react";
-import { BrainCircuit, Clock3, Layers3, ShieldCheck } from "lucide-react";
+import { BrainCircuit, Layers3, ShieldCheck } from "lucide-react";
+import { useState } from "react";
 
-import InferenceResults from "../analysis/InferenceResults.jsx";
+import ResultsView from "../analysis/ResultsView";
 import ScreeningHistory from "../history/ScreeningHistory.jsx";
-import UploadDropzone from "../upload/UploadDropzone.jsx";
-import { useAnalysisUpload } from "../../hooks/useAnalysisUpload.js";
+import Uploader from "../upload/Uploader";
 
 export default function Dashboard({ tenant, history, onAnalysisComplete }) {
-  const upload = useAnalysisUpload(tenant, onAnalysisComplete);
+  const [activeResult, setActiveResult] = useState(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
   const highPriority = history.filter((item) => item.prediction.confidence >= 0.75).length;
-  const averageLatency =
-    history.length === 0
-      ? 0
-      : Math.round(
-          history.reduce((total, item) => total + item.latencyMs, 0) / history.length,
-        );
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-5">
-      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <StatCard
           icon={BrainCircuit}
           label="Modelo"
           tone="accent"
           value="CNN + ViT"
-          detail="inferencia hibrida"
-        />
-        <StatCard
-          icon={Clock3}
-          label="Latencia media"
-          tone="success"
-          value={averageLatency ? `${averageLatency} ms` : "sin datos"}
-          detail="objetivo < 2s"
+          detail="modelo híbrido"
         />
         <StatCard
           icon={Layers3}
-          label="Analisis del tenant"
+          label="Análisis registrados"
           tone="warning"
           value={history.length}
-          detail={`${tenant.analysesToday} eventos hoy`}
+          detail="sesión actual"
         />
         <StatCard
           icon={ShieldCheck}
-          label="Cola preventiva"
+          label="Casos prioritarios"
           tone="danger"
-          value={highPriority + tenant.riskQueue}
-          detail="requieren revision"
+          value={highPriority}
+          detail="según confianza"
         />
       </section>
 
-      <section className="grid items-start gap-5 xl:grid-cols-[minmax(360px,0.92fr)_minmax(0,1.35fr)]">
-        <UploadDropzone upload={upload} />
-        <InferenceResults isProcessing={upload.isProcessing} result={upload.result} />
+      <section
+        className="grid items-start gap-5 xl:grid-cols-[minmax(360px,0.92fr)_minmax(0,1.35fr)]"
+        id="analysis-section"
+      >
+        <Uploader
+          tenant={tenant}
+          onAnalysisComplete={(result) => {
+            setActiveResult(result);
+            onAnalysisComplete(result);
+          }}
+          onProcessingChange={setIsProcessing}
+          onProgressChange={setProgress}
+        />
+        <ResultsView
+          isLoading={isProcessing}
+          progress={progress}
+          result={activeResult}
+        />
       </section>
 
-      <ScreeningHistory history={history} />
+      <section id="results-section">
+        <ScreeningHistory history={history} />
+      </section>
     </div>
   );
 }

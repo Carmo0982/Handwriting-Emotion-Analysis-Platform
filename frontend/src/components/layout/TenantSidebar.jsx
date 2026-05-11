@@ -1,13 +1,5 @@
-import { Button, Card, Chip, Label, ListBox, Select, Tooltip } from "@heroui/react";
-import {
-  Activity,
-  Building2,
-  ChevronDown,
-  Database,
-  LockKeyhole,
-  ShieldCheck,
-  Zap,
-} from "lucide-react";
+import { Card, Chip, Label, ListBox, Select } from "@heroui/react";
+import { Building2, ChevronDown } from "lucide-react";
 
 export default function TenantSidebar({ tenant, tenants, onTenantChange }) {
   return (
@@ -18,19 +10,19 @@ export default function TenantSidebar({ tenant, tenants, onTenantChange }) {
             <Building2 size={21} />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold">TDSE Platform</p>
-            <p className="truncate text-xs text-muted">Cloud-native mental health</p>
+            <p className="text-sm font-semibold">MentalTrace AI</p>
+            <p className="truncate text-xs text-muted">Salud mental para todos</p>
           </div>
         </div>
 
         <Select
           className="w-full"
-          onChange={onTenantChange}
-          placeholder="Tenant"
-          value={tenant.id}
+          onSelectionChange={(key) => onTenantChange(String(key))}
+          placeholder="Organización"
+          selectedKey={tenant.id}
           variant="secondary"
         >
-          <Label>Organizacion activa</Label>
+          <Label>Organización activa</Label>
           <Select.Trigger>
             <Select.Value />
             <Select.Indicator>
@@ -40,14 +32,14 @@ export default function TenantSidebar({ tenant, tenants, onTenantChange }) {
           <Select.Popover>
             <ListBox>
               {tenants.map((item) => (
-                <ListBox.Item id={item.id} key={item.id} textValue={item.name}>
+                <ListBox.Item className="pr-7" id={item.id} key={item.id} textValue={item.name}>
                   <div className="flex w-full items-center justify-between gap-3">
                     <span className="font-medium">{item.name}</span>
                     <Chip color="accent" size="sm" variant="soft">
                       {item.shortName}
                     </Chip>
                   </div>
-                  <ListBox.ItemIndicator />
+                  <ListBox.ItemIndicator className="ml-2" />
                 </ListBox.Item>
               ))}
             </ListBox>
@@ -59,55 +51,13 @@ export default function TenantSidebar({ tenant, tenants, onTenantChange }) {
             <Card.Title className="text-base">{tenant.name}</Card.Title>
             <Card.Description>{tenant.domain}</Card.Description>
           </Card.Header>
-          <Card.Content className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              {tenant.departments.map((department) => (
-                <Chip key={department} color="default" size="sm" variant="secondary">
-                  {department}
-                </Chip>
-              ))}
-            </div>
-
+          <Card.Content>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <TenantMetric label="Miembros" value={tenant.members} />
               <TenantMetric label="Hoy" value={tenant.analysesToday} />
             </div>
           </Card.Content>
         </Card>
-
-        <nav className="space-y-2">
-          <SidebarButton icon={Activity} label="Analisis" isActive />
-          <SidebarButton icon={Database} label="Resultados" />
-          <SidebarButton icon={ShieldCheck} label="Gobierno" />
-        </nav>
-
-        <div className="mt-auto space-y-3">
-          <div className="rounded-lg border border-border/70 bg-surface-secondary/72 p-3">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <LockKeyhole size={16} />
-                Aislamiento
-              </div>
-              <Chip color="success" size="sm" variant="soft">
-                {tenant.compliance}
-              </Chip>
-            </div>
-            <p className="break-all text-xs leading-5 text-muted">{tenant.id}</p>
-          </div>
-
-          <Tooltip>
-            <Tooltip.Trigger>
-              <Button className="w-full justify-start" variant="outline">
-                <Zap size={17} />
-                AWS pipeline activo
-              </Button>
-            </Tooltip.Trigger>
-            <Tooltip.Content showArrow>
-              <Tooltip.Arrow />
-              {tenant.region}
-            </Tooltip.Content>
-          </Tooltip>
-        </div>
       </div>
     </aside>
   );
@@ -122,14 +72,3 @@ function TenantMetric({ label, value }) {
   );
 }
 
-function SidebarButton({ icon: Icon, label, isActive = false }) {
-  return (
-    <Button
-      className={`w-full justify-start ${isActive ? "bg-accent-soft text-accent-soft-foreground" : ""}`}
-      variant={isActive ? "tertiary" : "ghost"}
-    >
-      <Icon size={17} />
-      {label}
-    </Button>
-  );
-}

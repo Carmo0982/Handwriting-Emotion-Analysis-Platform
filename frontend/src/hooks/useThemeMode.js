@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const STORAGE_KEY = "tdse-theme-mode";
+const STORAGE_KEY = "handwriting-theme-mode";
 
 export function useThemeMode() {
   const [mode, setMode] = useState(() => {
