@@ -13,3 +13,6 @@ crash.log
 crash.*.log
 *.tfplan
 .codex_temp/
+mcp.json
+.mcp.json
+
