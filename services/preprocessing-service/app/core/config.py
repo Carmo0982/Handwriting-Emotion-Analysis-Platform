@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     kafka_max_poll_records: int = 1
     consumer_retry_seconds: int = 5
 
-    s3_bucket_name: str = "tdse-handwriting-images"
+    s3_bucket_name: str = "tdse-images"
     aws_region: str = "us-east-1"
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
+    aws_access_key_id: str = "minioadmin"
+    aws_secret_access_key: str = "minioadmin"
     s3_endpoint_url: str = "http://localhost:9000"
 
     model_config = SettingsConfigDict(

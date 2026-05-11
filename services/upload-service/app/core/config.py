@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     max_upload_size_bytes: int = 10 * 1024 * 1024
     allowed_image_content_types: str = "image/png,image/jpeg"
 
-    s3_bucket_name: str = "tdse-handwriting-images"
+    s3_bucket_name: str = "tdse-images"
     aws_region: str = "us-east-1"
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
+    aws_access_key_id: str = "minioadmin"
+    aws_secret_access_key: str = "minioadmin"
     s3_endpoint_url: str = "http://localhost:9000"
 
     kafka_bootstrap_servers: str = "localhost:9092"

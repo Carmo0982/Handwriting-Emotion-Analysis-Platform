@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Literal, TypedDict
 from uuid import UUID, uuid4
@@ -10,6 +11,8 @@ from app.core.messaging import publish_event
 from app.core.storage import upload_to_s3
 from app.dependencies import AuthContext
 
+
+logger = logging.getLogger(__name__)
 
 ImageProcessingStatus = Literal["processing", "completed", "failed"]
 
@@ -65,6 +68,7 @@ class UploadService:
         try:
             uploaded_key = upload_to_s3(file_bytes, s3_key)
         except Exception as exc:
+            logger.exception("Image storage failed for s3_key=%s", s3_key)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Image storage failed",
